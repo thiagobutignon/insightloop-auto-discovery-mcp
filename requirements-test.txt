@@ -1,0 +1,21 @@
+# Testing dependencies for MCP Orchestrator API
+
+# Core testing framework
+pytest==8.3.4
+pytest-asyncio==0.24.0
+pytest-timeout==2.3.1
+pytest-cov==5.0.0
+
+# HTTP client for testing
+httpx==0.28.1
+
+# Test utilities
+faker==30.10.0
+pytest-mock==3.14.0
+
+# Performance testing
+locust==2.32.4
+
+# Test reporting
+pytest-html==4.1.1
+allure-pytest==2.13.5

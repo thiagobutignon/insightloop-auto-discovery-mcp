@@ -2,9 +2,8 @@
 Data models and type definitions for MCP orchestration
 """
 
-from .types import ServerInfo, MCPEndpoint
+from .types import ServerInfo
 
 __all__ = [
-    'ServerInfo',
-    'MCPEndpoint'
+    'ServerInfo'
 ]

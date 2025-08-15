@@ -7,7 +7,7 @@ It handles task planning, tool invocation, and intelligent response generation.
 Example Usage:
     ```python
     from src.orchestrators import GeminiOrchestrator
-    from src.types import ServerInfo
+    from src.models import ServerInfo
     
     orchestrator = GeminiOrchestrator()
     server = ServerInfo(...)
@@ -32,7 +32,7 @@ import httpx
 
 # Import from proper module structure
 from ..clients import UniversalMCPClient
-from ..types import ServerInfo
+from ..models import ServerInfo
 
 logger = logging.getLogger("mcp_orchestrator")
 

@@ -20,7 +20,8 @@ import hashlib
 from contextlib import asynccontextmanager
 import re
 
-# Import SSE client for MCP servers
+# Import universal MCP client
+from mcp_client_universal import UniversalMCPClient, MCPProtocol
 from mcp_sse_client import MCPSSEClient, MCPSSEOrchestrator
 
 # Configure logging
@@ -288,24 +289,31 @@ async def deploy_server_task(server_info: ServerInfo, method: str, port: Optiona
         server_info.endpoint = endpoint
         server_info.status = "deployed"
         
+        # Register server BEFORE discovering capabilities
+        server_registry[server_info.id] = server_info
+        logger.info(f"Registered server {server_info.name} with ID {server_info.id}")
+        
         # Discover MCP capabilities automatically
         logger.info(f"Discovering MCP capabilities for {server_info.name} at {endpoint}")
         capabilities = await discover_mcp_capabilities(endpoint)
         server_info.capabilities = capabilities
         
-        # If capabilities were discovered, notify Gemini orchestrator
+        # If capabilities were discovered, update server info
         if capabilities and capabilities.get("tools"):
             logger.info(f"Found {len(capabilities['tools'])} tools for {server_info.name}")
-            # Store tools for Gemini to use
+            # Store tools and protocol info for Gemini to use
             server_info.capabilities = {
                 "tools": capabilities["tools"],
+                "resources": capabilities.get("resources", []),
+                "protocol": capabilities.get("protocol", "unknown"),
+                "endpoint": capabilities.get("endpoint", endpoint),
                 "discovered_at": datetime.now().isoformat(),
                 "auto_discovered": True
             }
+            # Update registry with new capabilities
+            server_registry[server_info.id] = server_info
         
-        # Register server
-        server_registry[server_info.id] = server_info
-        logger.info(f"Successfully deployed and registered {server_info.name} with {len(capabilities.get('tools', []))} tools")
+        logger.info(f"Successfully deployed {server_info.name} with {len(capabilities.get('tools', []))} tools using {capabilities.get('protocol', 'unknown')} protocol")
         
     except Exception as e:
         logger.error(f"Deployment failed: {e}")
@@ -315,11 +323,32 @@ async def deploy_server_task(server_info: ServerInfo, method: str, port: Optiona
 
 
 async def discover_mcp_capabilities(endpoint: str) -> Dict:
-    """Automatically discover MCP server capabilities"""
+    """Automatically discover MCP server capabilities using universal client"""
     
-    capabilities = {"tools": [], "resources": [], "prompts": []}
+    capabilities = {"tools": [], "resources": [], "prompts": [], "protocol": "unknown"}
     
-    # Try different discovery methods based on endpoint type
+    try:
+        # Use universal client for better protocol detection
+        client = UniversalMCPClient(endpoint)
+        connected = await client.connect()
+        
+        if connected:
+            caps = await client.get_capabilities()
+            capabilities["tools"] = caps.get("tools", [])
+            capabilities["resources"] = caps.get("resources", [])
+            capabilities["protocol"] = caps.get("protocol", "unknown")
+            capabilities["endpoint"] = caps.get("endpoint", endpoint)
+            
+            await client.close()
+            
+            if capabilities["tools"]:
+                logger.info(f"Discovered {len(capabilities['tools'])} tools via universal client")
+                return capabilities
+        
+    except Exception as e:
+        logger.error(f"Universal client discovery failed: {e}")
+    
+    # Fallback to old method if universal client fails
     if endpoint.startswith("http"):
         # For Context7 and similar HTTP/SSE servers
         try:
@@ -616,65 +645,44 @@ class ServerDeployer:
 
 
 class MCPClient:
-    """MCP client for connecting to deployed servers"""
+    """MCP client wrapper using universal client"""
     
     def __init__(self, endpoint: str):
         self.endpoint = endpoint
-        self.session = None
-        self.ws = None
+        self.client = UniversalMCPClient(endpoint)
     
     async def connect(self) -> bool:
-        """Connect to MCP server"""
-        
+        """Connect to MCP server using universal client"""
         try:
-            if self.endpoint.startswith("http"):
-                self.session = aiohttp.ClientSession()
-                # Test connection
-                async with self.session.get(f"{self.endpoint}/.well-known/mcp") as response:
-                    return response.status in (200, 204)
-            elif self.endpoint.startswith("ws"):
-                # WebSocket connection would go here
-                pass
-            elif self.endpoint.startswith("stdio"):
-                # Stdio connection would go here
-                pass
-            
-            return True
+            return await self.client.connect()
         except Exception as e:
             logger.error(f"Connection failed: {e}")
             return False
     
     async def discover_capabilities(self) -> Dict:
         """Discover server capabilities"""
-        
-        if self.session:
-            try:
-                async with self.session.get(f"{self.endpoint}/capabilities") as response:
-                    if response.status == 200:
-                        return await response.json()
-            except Exception as e:
-                logger.error(f"Capability discovery failed: {e}")
-        
-        return {}
+        try:
+            caps = await self.client.get_capabilities()
+            return {
+                "tools": caps.get("tools", []),
+                "resources": caps.get("resources", []),
+                "protocol": caps.get("protocol", "unknown")
+            }
+        except Exception as e:
+            logger.error(f"Capability discovery failed: {e}")
+            return {}
     
     async def invoke_tool(self, tool_name: str, args: Dict) -> Dict:
         """Invoke a tool on the server"""
-        
-        if self.session:
-            try:
-                payload = {"tool": tool_name, "args": args}
-                async with self.session.post(f"{self.endpoint}/invoke", json=payload) as response:
-                    return await response.json()
-            except Exception as e:
-                logger.error(f"Tool invocation failed: {e}")
-                raise
-        
-        raise Exception("Not connected")
+        try:
+            return await self.client.invoke_tool(tool_name, args)
+        except Exception as e:
+            logger.error(f"Tool invocation failed: {e}")
+            raise
     
     async def close(self):
         """Close connection"""
-        if self.session:
-            await self.session.close()
+        await self.client.close()
 
 
 class GeminiOrchestrator:
@@ -698,78 +706,104 @@ class GeminiOrchestrator:
             }
         
         try:
-            # Use SSE client for better compatibility
-            sse_client = MCPSSEClient(server.endpoint)
-            connected = await sse_client.connect()
+            # Use universal client for maximum compatibility
+            universal_client = UniversalMCPClient(server.endpoint)
+            connected = await universal_client.connect()
             
             if not connected:
-                # Fallback to regular client
-                client = MCPClient(server.endpoint)
-                connected = await client.connect()
-                
-                if not connected:
-                    return {
-                        "status": "error",
-                        "prompt": prompt,
-                        "server": server.id,
-                        "error": "Failed to connect to MCP server",
-                        "result": f"Could not connect to {server.endpoint}"
-                    }
-                
-                # Use regular client
-                capabilities = await client.discover_capabilities()
-            else:
-                # Use SSE client - get capabilities from tools list
-                tools = await sse_client.list_tools()
-                capabilities = {"tools": tools} if tools else {}
+                return {
+                    "status": "error",
+                    "prompt": prompt,
+                    "server": server.id,
+                    "error": "Failed to connect to MCP server",
+                    "result": f"Could not connect to {server.endpoint}"
+                }
             
-            # For Context7, try to use the actual tools with SSE
-            if "context7" in server.name.lower() and connected and sse_client.initialized:
-                # Context7 has specific tools for documentation
+            # Get capabilities from universal client
+            caps = await universal_client.get_capabilities()
+            capabilities = {
+                "tools": caps.get("tools", []),
+                "resources": caps.get("resources", []),
+                "protocol": caps.get("protocol", "unknown")
+            }
+            
+            # For Context7 or servers with tools, try to invoke them
+            if connected and caps.get("tools"):
+                # Try to invoke tools based on prompt
                 try:
-                    # Use SSE client to invoke Context7 tools
-                    library = "nextjs" if "next" in prompt.lower() else "react"
-                    topic = "routing" if "routing" in prompt.lower() else "hooks"
+                    # For documentation requests
+                    if any(word in prompt.lower() for word in ["docs", "documentation", "library"]):
+                        library = "nextjs" if "next" in prompt.lower() else "react"
+                        topic = "routing" if "routing" in prompt.lower() else "hooks"
+                        
+                        # Check if we have resolve-library-id tool
+                        resolve_tool = next((t for t in caps["tools"] if "resolve" in t["name"].lower()), None)
+                        docs_tool = next((t for t in caps["tools"] if "docs" in t["name"].lower() or "library" in t["name"].lower()), None)
+                        
+                        results = {}
+                        
+                        if resolve_tool:
+                            # Step 1: Resolve library ID
+                            resolve_result = await universal_client.invoke_tool(
+                                resolve_tool["name"],
+                                {"libraryName": library}
+                            )
+                            results["resolve"] = resolve_result
+                            
+                            # Extract library ID from result
+                            library_id = f"/vercel/next.js" if library == "nextjs" else f"/facebook/react"
+                            if isinstance(resolve_result, dict) and "content" in resolve_result:
+                                import re
+                                match = re.search(r'(/[^/]+/[^/\s]+)', str(resolve_result["content"]))
+                                if match:
+                                    library_id = match.group(1)
+                        else:
+                            library_id = f"/vercel/next.js" if library == "nextjs" else f"/facebook/react"
+                        
+                        if docs_tool:
+                            # Step 2: Get documentation
+                            docs_args = {}
+                            # Build args based on tool schema
+                            if "inputSchema" in docs_tool:
+                                schema = docs_tool["inputSchema"]
+                                if "properties" in schema:
+                                    for prop in schema["properties"]:
+                                        if "library" in prop.lower() or "id" in prop.lower():
+                                            docs_args[prop] = library_id
+                                        elif "topic" in prop.lower():
+                                            docs_args[prop] = topic
+                            
+                            if not docs_args:
+                                # Fallback args
+                                docs_args = {"context7CompatibleLibraryID": library_id, "topic": topic}
+                            
+                            docs_result = await universal_client.invoke_tool(
+                                docs_tool["name"],
+                                docs_args
+                            )
+                            results["documentation"] = docs_result
+                        
+                        await universal_client.close()
                     
-                    # Step 1: Resolve library ID
-                    resolve_result = await sse_client.invoke_tool(
-                        "resolve-library-id",
-                        {"libraryName": library}
-                    )
-                    
-                    # Extract library ID
-                    library_id = f"/vercel/next.js" if library == "nextjs" else f"/facebook/react"
-                    
-                    # Step 2: Get documentation
-                    docs_result = await sse_client.invoke_tool(
-                        "get-library-docs",
-                        {
-                            "context7CompatibleLibraryID": library_id,
-                            "topic": topic
+                        return {
+                            "status": "completed",
+                            "prompt": prompt,
+                            "server": server.id,
+                            "protocol": caps.get("protocol", "unknown"),
+                            "capabilities": capabilities,
+                            "plan": [
+                                {"action": "connect", "description": f"Connected via {caps.get('protocol', 'unknown')}"},
+                                {"action": "discover", "description": f"Found {len(caps.get('tools', []))} tools"},
+                                {"action": "invoke", "description": "Invoked tools based on prompt"},
+                                {"action": "complete", "result": "Task completed"}
+                            ],
+                            "results": results,
+                            "result": f"Successfully processed request using {caps.get('protocol', 'unknown')} protocol"
                         }
-                    )
-                    
-                    await sse_client.close()
-                    
-                    return {
-                        "status": "completed",
-                        "prompt": prompt,
-                        "server": server.id,
-                        "capabilities": capabilities,
-                        "plan": [
-                            {"action": "connect", "description": "Connected to MCP server via SSE"},
-                            {"action": "invoke_tool", "tool": "resolve-library-id", "args": {"libraryName": library}},
-                            {"action": "invoke_tool", "tool": "get-library-docs", "args": {"library": library_id, "topic": topic}},
-                            {"action": "complete", "result": "Retrieved documentation"}
-                        ],
-                        "results": {
-                            "resolve": resolve_result,
-                            "documentation": docs_result
-                        },
-                        "result": f"Successfully retrieved {library} documentation on {topic}"
-                    }
                 except Exception as e:
-                    logger.error(f"Context7 tool invocation failed: {e}")
+                    logger.error(f"Tool invocation failed: {e}")
+            
+            await universal_client.close()
             
             # For now, call Gemini API to generate a plan (simplified)
             plan = await self._generate_plan_with_gemini(prompt, capabilities, context)

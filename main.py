@@ -20,6 +20,9 @@ import hashlib
 from contextlib import asynccontextmanager
 import re
 
+# Import SSE client for MCP servers
+from mcp_sse_client import MCPSSEClient, MCPSSEOrchestrator
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("mcp_orchestrator")
@@ -695,33 +698,58 @@ class GeminiOrchestrator:
             }
         
         try:
-            # Connect to MCP server
-            client = MCPClient(server.endpoint)
-            connected = await client.connect()
+            # Use SSE client for better compatibility
+            sse_client = MCPSSEClient(server.endpoint)
+            connected = await sse_client.connect()
             
             if not connected:
-                return {
-                    "status": "error",
-                    "prompt": prompt,
-                    "server": server.id,
-                    "error": "Failed to connect to MCP server",
-                    "result": f"Could not connect to {server.endpoint}"
-                }
+                # Fallback to regular client
+                client = MCPClient(server.endpoint)
+                connected = await client.connect()
+                
+                if not connected:
+                    return {
+                        "status": "error",
+                        "prompt": prompt,
+                        "server": server.id,
+                        "error": "Failed to connect to MCP server",
+                        "result": f"Could not connect to {server.endpoint}"
+                    }
+                
+                # Use regular client
+                capabilities = await client.discover_capabilities()
+            else:
+                # Use SSE client - get capabilities from tools list
+                tools = await sse_client.list_tools()
+                capabilities = {"tools": tools} if tools else {}
             
-            # Get server capabilities
-            capabilities = await client.discover_capabilities()
-            
-            # For Context7, try to use the actual tools
-            if "context7" in server.name.lower():
+            # For Context7, try to use the actual tools with SSE
+            if "context7" in server.name.lower() and connected and sse_client.initialized:
                 # Context7 has specific tools for documentation
                 try:
-                    # Try to invoke Context7's get-library-docs tool
-                    if "next" in prompt.lower() or "routing" in prompt.lower():
-                        result = await self._invoke_context7_tool(client, "nextjs", "routing")
-                    else:
-                        result = await self._invoke_context7_tool(client, "react", "hooks")
+                    # Use SSE client to invoke Context7 tools
+                    library = "nextjs" if "next" in prompt.lower() else "react"
+                    topic = "routing" if "routing" in prompt.lower() else "hooks"
                     
-                    await client.close()
+                    # Step 1: Resolve library ID
+                    resolve_result = await sse_client.invoke_tool(
+                        "resolve-library-id",
+                        {"libraryName": library}
+                    )
+                    
+                    # Extract library ID
+                    library_id = f"/vercel/next.js" if library == "nextjs" else f"/facebook/react"
+                    
+                    # Step 2: Get documentation
+                    docs_result = await sse_client.invoke_tool(
+                        "get-library-docs",
+                        {
+                            "context7CompatibleLibraryID": library_id,
+                            "topic": topic
+                        }
+                    )
+                    
+                    await sse_client.close()
                     
                     return {
                         "status": "completed",
@@ -729,12 +757,16 @@ class GeminiOrchestrator:
                         "server": server.id,
                         "capabilities": capabilities,
                         "plan": [
-                            {"action": "connect", "description": "Connected to MCP server"},
-                            {"action": "discover", "description": "Discovered server capabilities"},
-                            {"action": "invoke_tool", "tool": "get-library-docs", "args": {"library": "nextjs"}},
+                            {"action": "connect", "description": "Connected to MCP server via SSE"},
+                            {"action": "invoke_tool", "tool": "resolve-library-id", "args": {"libraryName": library}},
+                            {"action": "invoke_tool", "tool": "get-library-docs", "args": {"library": library_id, "topic": topic}},
                             {"action": "complete", "result": "Retrieved documentation"}
                         ],
-                        "result": result
+                        "results": {
+                            "resolve": resolve_result,
+                            "documentation": docs_result
+                        },
+                        "result": f"Successfully retrieved {library} documentation on {topic}"
                     }
                 except Exception as e:
                     logger.error(f"Context7 tool invocation failed: {e}")

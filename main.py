@@ -4,7 +4,7 @@ Discovers MCP servers from GitHub, deploys them, and orchestrates with Gemini
 """
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any, Literal
 from datetime import datetime, timedelta
@@ -59,7 +59,7 @@ class ServerInfo(BaseModel):
     name: str
     github_url: str
     description: Optional[str] = None
-    deploy_method: Literal["docker", "npx", "e2b", "local", "auto"]
+    deploy_method: Literal["docker", "npx", "e2b", "local", "auto", "external"]
     status: Literal["discovered", "validated", "deployed", "failed"]
     endpoint: Optional[str] = None
     capabilities: Optional[Dict[str, Any]] = None
@@ -70,6 +70,11 @@ class DeployRequest(BaseModel):
     github_url: str = Field(..., description="GitHub repository URL")
     method: Literal["docker", "npx", "e2b", "auto"] = Field("auto", description="Deployment method")
     port: Optional[int] = Field(None, description="Port for HTTP/WebSocket servers")
+
+class RegisterRequest(BaseModel):
+    name: str = Field(..., description="Server name")
+    endpoint: str = Field(..., description="Server endpoint URL")
+    github_url: Optional[str] = Field(None, description="GitHub repository URL")
 
 class OrchestrationRequest(BaseModel):
     server_id: str = Field(..., description="ID of the deployed MCP server")
@@ -140,6 +145,45 @@ async def discover_servers(request: ServerDiscoveryRequest, background_tasks: Ba
         logger.error(f"Discovery failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# Register endpoint for existing servers
+@app.post("/api/register", response_model=ServerInfo)
+async def register_server(request: RegisterRequest):
+    """
+    Register an existing MCP server that is already running
+    """
+    try:
+        # Create server ID from endpoint
+        server_id = hashlib.md5(request.endpoint.encode()).hexdigest()[:12]
+        
+        # Check if already registered
+        if server_id in server_registry:
+            return server_registry[server_id]
+        
+        server_info = ServerInfo(
+            id=server_id,
+            name=request.name,
+            github_url=request.github_url or f"https://github.com/{request.name}",
+            deploy_method="external",
+            status="deployed",
+            endpoint=request.endpoint,
+            created_at=datetime.now()
+        )
+        
+        # Discover capabilities
+        logger.info(f"Discovering capabilities for {request.name} at {request.endpoint}")
+        capabilities = await discover_mcp_capabilities(request.endpoint)
+        server_info.capabilities = capabilities
+        
+        # Register server
+        server_registry[server_id] = server_info
+        logger.info(f"Registered external server {request.name} with {len(capabilities.get('tools', []))} tools")
+        
+        return server_info
+        
+    except Exception as e:
+        logger.error(f"Registration failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Deploy endpoint
 @app.post("/api/deploy", response_model=ServerInfo)
 async def deploy_server(request: DeployRequest, background_tasks: BackgroundTasks):
@@ -205,11 +249,12 @@ async def get_server(server_id: str):
     else:
         raise HTTPException(status_code=404, detail="Server not found")
 
-# Orchestration endpoint
+# Orchestration endpoint (non-streaming for backward compatibility)
 @app.post("/api/orchestrate")
 async def orchestrate_task(request: OrchestrationRequest):
     """
     Execute a task using Gemini orchestration on a deployed MCP server
+    Returns complete result as JSON
     """
     if request.server_id not in server_registry:
         raise HTTPException(status_code=404, detail="Server not deployed")
@@ -229,6 +274,53 @@ async def orchestrate_task(request: OrchestrationRequest):
     except Exception as e:
         logger.error(f"Orchestration failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# Streaming orchestration endpoint
+@app.post("/api/orchestrate/stream")
+async def orchestrate_task_stream(request: OrchestrationRequest):
+    """
+    Execute a task using Gemini orchestration with Server-Sent Events streaming
+    Returns real-time updates as the orchestration progresses
+    """
+    if request.server_id not in server_registry:
+        raise HTTPException(status_code=404, detail="Server not deployed")
+    
+    server = server_registry[request.server_id]
+    if server.status != "deployed":
+        raise HTTPException(status_code=400, detail="Server not ready")
+    
+    async def event_generator():
+        """Generate SSE events for orchestration progress"""
+        try:
+            # Send initial event
+            yield f"data: {json.dumps({'event': 'start', 'server': server.name, 'prompt': request.prompt})}\n\n"
+            
+            orchestrator = GeminiOrchestrator()
+            
+            # Stream the orchestration process
+            async for event in orchestrator.execute_task_stream(
+                server=server,
+                prompt=request.prompt,
+                context=request.context
+            ):
+                yield f"data: {json.dumps(event)}\n\n"
+            
+            # Send completion event
+            yield f"data: {json.dumps({'event': 'complete'})}\n\n"
+            
+        except Exception as e:
+            logger.error(f"Streaming orchestration failed: {e}")
+            yield f"data: {json.dumps({'event': 'error', 'error': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"  # Disable Nginx buffering
+        }
+    )
 
 # Tool invocation endpoint
 @app.post("/api/invoke")
@@ -570,10 +662,32 @@ class ServerDeployer:
             if result.returncode != 0:
                 raise Exception(f"Docker build failed: {result.stderr}")
             
-            # Run container (map to internal port 8080 for MCP servers)
+            # Run container with environment variables
             internal_port = 8080  # Most MCP servers run on 8080
+            
+            # Pass environment variables to container
+            docker_run_cmd = [
+                "docker", "run", "-d", 
+                "--name", container_name,
+                "-p", f"{port}:{internal_port}"
+            ]
+            
+            # Add environment variables if needed
+            if "github" in container_name.lower():
+                github_token = os.getenv("GITHUB_TOKEN", "")
+                if github_token:
+                    docker_run_cmd.extend(["-e", f"GITHUB_PERSONAL_ACCESS_TOKEN={github_token}"])
+                    docker_run_cmd.extend(["-e", f"GITHUB_TOKEN={github_token}"])
+            
+            # Add Gemini API key if available
+            gemini_key = os.getenv("GEMINI_API_KEY", "")
+            if gemini_key:
+                docker_run_cmd.extend(["-e", f"GEMINI_API_KEY={gemini_key}"])
+            
+            docker_run_cmd.append(container_name)
+            
             result = subprocess.run(
-                ["docker", "run", "-d", "--name", container_name, "-p", f"{port}:{internal_port}", container_name],
+                docker_run_cmd,
                 capture_output=True,
                 text=True
             )
@@ -692,6 +806,101 @@ class GeminiOrchestrator:
         self.api_key = os.getenv("GEMINI_API_KEY")
         if not self.api_key:
             logger.warning("GEMINI_API_KEY not set - orchestration will be limited")
+    
+    async def execute_task_stream(self, server: ServerInfo, prompt: str, context: Optional[Dict] = None):
+        """Execute task with streaming updates"""
+        
+        if not self.api_key:
+            yield {"event": "error", "message": "GEMINI_API_KEY not configured"}
+            return
+        
+        try:
+            # Connect to MCP server
+            yield {"event": "connecting", "message": f"Connecting to {server.name}..."}
+            
+            universal_client = UniversalMCPClient(server.endpoint)
+            connected = await universal_client.connect()
+            
+            if not connected:
+                yield {"event": "error", "message": f"Failed to connect to {server.endpoint}"}
+                return
+            
+            # Get capabilities
+            yield {"event": "discovering", "message": "Discovering server capabilities..."}
+            caps = await universal_client.get_capabilities()
+            tools = caps.get("tools", [])
+            
+            yield {
+                "event": "capabilities",
+                "protocol": caps.get("protocol", "unknown"),
+                "tools_count": len(tools),
+                "tools": [{"name": t.get("name"), "description": t.get("description", "")} for t in tools]
+            }
+            
+            # Generate plan with Gemini
+            yield {"event": "planning", "message": "Generating execution plan with Gemini..."}
+            
+            plan = await self._generate_plan_with_gemini(prompt, caps, context)
+            
+            if plan and plan.get("steps"):
+                yield {
+                    "event": "plan_ready",
+                    "plan": plan["steps"],
+                    "steps_count": len(plan["steps"])
+                }
+                
+                # Execute plan steps
+                for i, step in enumerate(plan["steps"]):
+                    yield {
+                        "event": "executing_step",
+                        "step_index": i + 1,
+                        "total_steps": len(plan["steps"]),
+                        "action": step.get("action"),
+                        "description": step.get("description", "")
+                    }
+                    
+                    if step["action"] == "invoke_tool":
+                        try:
+                            tool_name = step.get("tool")
+                            args = step.get("args", {})
+                            
+                            yield {
+                                "event": "invoking_tool",
+                                "tool": tool_name,
+                                "args": args
+                            }
+                            
+                            result = await universal_client.invoke_tool(tool_name, args)
+                            
+                            yield {
+                                "event": "tool_result",
+                                "tool": tool_name,
+                                "success": "error" not in result,
+                                "result": result
+                            }
+                            
+                        except Exception as e:
+                            yield {
+                                "event": "tool_error",
+                                "tool": tool_name,
+                                "error": str(e)
+                            }
+            
+            # Get Gemini's final response
+            yield {"event": "finalizing", "message": "Getting Gemini's final response..."}
+            
+            gemini_response = await self._get_gemini_response(prompt, plan, context)
+            
+            yield {
+                "event": "gemini_response",
+                "response": gemini_response
+            }
+            
+            await universal_client.close()
+            
+        except Exception as e:
+            logger.error(f"Streaming orchestration failed: {e}")
+            yield {"event": "error", "error": str(e)}
     
     async def execute_task(self, server: ServerInfo, prompt: str, context: Optional[Dict] = None) -> Dict:
         """Execute a task using Gemini to orchestrate MCP server tools"""
@@ -813,12 +1022,12 @@ class GeminiOrchestrator:
             for step in plan.get("steps", []):
                 if step["action"] == "invoke_tool":
                     try:
-                        tool_result = await client.invoke_tool(step["tool"], step.get("args", {}))
+                        tool_result = await universal_client.invoke_tool(step["tool"], step.get("args", {}))
                         results.append(tool_result)
                     except Exception as e:
                         results.append({"error": str(e)})
             
-            await client.close()
+            # Client already closed above
             
             return {
                 "status": "completed",
@@ -868,6 +1077,58 @@ class GeminiOrchestrator:
         except Exception as e:
             return {"error": str(e)}
     
+    async def _get_gemini_response(self, prompt: str, plan: Dict, context: Optional[Dict]) -> str:
+        """Get Gemini's final response after executing the plan"""
+        
+        if not self.api_key:
+            return "Gemini API key not configured"
+        
+        try:
+            import httpx
+            
+            model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+            gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.api_key}"
+            
+            # Build prompt with plan results
+            system_prompt = f"""You are an AI assistant helping with MCP server orchestration.
+            The user asked: {prompt}
+            
+            The execution plan and results were:
+            {json.dumps(plan, indent=2)}
+            
+            Based on the execution results, provide a helpful response to the user's original request.
+            Be concise and focus on answering their question directly.
+            """
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    gemini_url,
+                    json={
+                        "contents": [{"parts": [{"text": system_prompt}]}],
+                        "generationConfig": {
+                            "temperature": 0.7,
+                            "maxOutputTokens": 2048
+                        }
+                    },
+                    timeout=30
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    try:
+                        text = result["candidates"][0]["content"]["parts"][0]["text"]
+                        return text
+                    except Exception as e:
+                        logger.error(f"Failed to parse Gemini response: {e}")
+                        return "Failed to parse Gemini response"
+                else:
+                    logger.error(f"Gemini API returned {response.status_code}")
+                    return f"Gemini API error: {response.status_code}"
+                    
+        except Exception as e:
+            logger.error(f"Gemini response generation failed: {e}")
+            return f"Error generating response: {str(e)}"
+    
     async def _generate_plan_with_gemini(self, prompt: str, capabilities: Dict, context: Optional[Dict]) -> Dict:
         """Generate execution plan using Gemini API"""
         
@@ -878,7 +1139,9 @@ class GeminiOrchestrator:
             # Simplified Gemini API call using httpx
             import httpx
             
-            gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={self.api_key}"
+            # Use the model from environment or default to gemini-1.5-flash
+            model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+            gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.api_key}"
             
             # Build tools description from discovered capabilities
             tools_desc = ""

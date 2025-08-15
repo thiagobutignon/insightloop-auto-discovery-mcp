@@ -389,6 +389,10 @@ class UniversalMCPClient:
     async def invoke_tool(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         """Invoke a tool on the MCP server"""
         try:
+            # Ensure we have a session for HTTP-based protocols
+            if self.protocol in [MCPProtocol.HTTP_JSONRPC, MCPProtocol.SSE] and not self.session:
+                self.session = aiohttp.ClientSession()
+            
             request = {
                 "jsonrpc": "2.0",
                 "method": "tools/call",

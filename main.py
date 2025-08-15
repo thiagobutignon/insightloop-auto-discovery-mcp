@@ -20,11 +20,8 @@ import hashlib
 from contextlib import asynccontextmanager
 import re
 
-# Import universal MCP client
-from mcp_client_universal import UniversalMCPClient, MCPProtocol
-from mcp_sse_client import MCPSSEClient, MCPSSEOrchestrator
-
-# Import orchestrators from new structure
+# Import from organized module structure
+from src.clients import UniversalMCPClient, MCPProtocol, MCPSSEClient, MCPSSEOrchestrator
 from src.orchestrators import GeminiOrchestrator
 
 # Configure logging

@@ -1,20 +1,40 @@
 """
 Gemini AI Orchestrator for MCP Servers
-Handles task planning and execution using Google's Gemini AI
+
+This module provides orchestration capabilities for MCP servers using Google's Gemini AI.
+It handles task planning, tool invocation, and intelligent response generation.
+
+Example Usage:
+    ```python
+    from src.orchestrators import GeminiOrchestrator
+    from src.types import ServerInfo
+    
+    orchestrator = GeminiOrchestrator()
+    server = ServerInfo(...)
+    result = await orchestrator.execute_task(server, "Get React documentation")
+    ```
+
+Dependencies:
+    - Google Gemini API (requires GEMINI_API_KEY environment variable)
+    - UniversalMCPClient for protocol-agnostic MCP communication
+    - httpx for async HTTP requests
+
+Environment Variables:
+    - GEMINI_API_KEY: Your Google Gemini API key
+    - GEMINI_MODEL: Model to use (defaults to "gemini-2.5-flash")
 """
 
 import os
 import json
 import logging
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, AsyncGenerator
 import httpx
 
-# Import MCP client - will be refactored later
-import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-from mcp_client_universal import UniversalMCPClient
+# Import from proper module structure
+from ..clients import UniversalMCPClient
+from ..types import ServerInfo
 
-logger = logging.getLogger("gemini_orchestrator")
+logger = logging.getLogger("mcp_orchestrator")
 
 
 class GeminiOrchestrator:
@@ -25,7 +45,7 @@ class GeminiOrchestrator:
         if not self.api_key:
             logger.warning("GEMINI_API_KEY not set - orchestration will be limited")
     
-    async def execute_task_stream(self, server, prompt: str, context: Optional[Dict] = None):
+    async def execute_task_stream(self, server: ServerInfo, prompt: str, context: Optional[Dict] = None) -> AsyncGenerator[Dict[str, Any], None]:
         """Execute task with streaming updates"""
         
         if not self.api_key:
@@ -120,7 +140,7 @@ class GeminiOrchestrator:
             logger.error(f"Streaming orchestration failed: {e}")
             yield {"event": "error", "error": str(e)}
     
-    async def execute_task(self, server, prompt: str, context: Optional[Dict] = None) -> Dict:
+    async def execute_task(self, server: ServerInfo, prompt: str, context: Optional[Dict] = None) -> Dict[str, Any]:
         """Execute a task using Gemini to orchestrate MCP server tools"""
         
         if not self.api_key:

@@ -1,12 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Server as ServerEntity, ServerProtocol, ServerStatus } from '@/domain/entities/Server'
+import { LogsViewer } from '@/features/monitoring/components/LogsViewer'
+import { cn } from '@/lib/utils'
 import { useServerStore } from '@/presentation/stores/serverStore'
 import { GlassCard } from '@/shared/components/GlassCard'
-import { Server, Activity, StopCircle, Loader2, Tool, Database, FileText, Terminal } from 'lucide-react'
-import { cn } from '@/lib/utils'
-import { ServerProtocol, ServerStatus, Server as ServerEntity } from '@/domain/entities/Server'
-import { LogsViewer } from '@/features/monitoring/components/LogsViewer'
+import { Activity, Database, FileText, Loader2, Server, StopCircle, Terminal, Wrench } from 'lucide-react'
+import { useEffect, useState } from 'react'
 
 export function RunningServers() {
   const { runningServers, loading, error, loadRunningServers, stopServer, selectServer } = useServerStore()
@@ -100,7 +100,7 @@ export function RunningServers() {
                 <div className="flex flex-wrap gap-2">
                   {server.capabilities.tools && server.capabilities.tools.length > 0 && (
                     <div className="flex items-center gap-1 px-2 py-1 bg-blue-500/10 rounded-md">
-                      <Tool className="w-3 h-3 text-blue-400" />
+                      <Wrench className="w-3 h-3 text-blue-400" />
                       <span className="text-xs text-blue-400">{server.capabilities.tools.length} tools</span>
                     </div>
                   )}

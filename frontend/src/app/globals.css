@@ -51,7 +51,7 @@
 
 @layer base {
   * {
-    @apply border-border;
+    border-color: hsl(var(--border));
   }
   body {
     @apply bg-background text-foreground;
@@ -77,5 +77,21 @@
   .glass-card:hover {
     @apply transform -translate-y-1;
     box-shadow: 0 12px 40px rgba(31, 38, 135, 0.2);
+  }
+
+  /* Animation for slide-in notification */
+  @keyframes slide-in {
+    from {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+
+  .animate-slide-in {
+    animation: slide-in 0.3s ease-out;
   }
 }

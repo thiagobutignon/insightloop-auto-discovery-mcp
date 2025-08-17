@@ -1,4 +1,5 @@
 import { RunningServers } from '@/features/deployment/components/RunningServers'
+import { FeatureErrorBoundary } from '@/shared/components/FeatureErrorBoundary'
 
 export default function ServersPage() {
   return (
@@ -12,7 +13,9 @@ export default function ServersPage() {
         </p>
       </div>
       
-      <RunningServers />
+      <FeatureErrorBoundary feature="running-servers">
+        <RunningServers />
+      </FeatureErrorBoundary>
     </div>
   )
 }

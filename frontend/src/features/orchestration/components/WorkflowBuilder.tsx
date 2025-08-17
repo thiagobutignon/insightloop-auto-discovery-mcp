@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, memo, useCallback } from 'react'
 import { GlassCard } from '@/shared/components/GlassCard'
 import { 
   Plus, 
@@ -20,41 +20,20 @@ import {
   Loader2
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-
-interface WorkflowNode {
-  id: string
-  type: 'start' | 'tool' | 'condition' | 'end'
-  name: string
-  description?: string
-  tool?: string
-  args?: Record<string, any>
-  position: { x: number; y: number }
-  connections: string[]
-}
-
-interface WorkflowEdge {
-  id: string
-  source: string
-  target: string
-  label?: string
-}
-
-interface Workflow {
-  id: string
-  name: string
-  description?: string
-  nodes: WorkflowNode[]
-  edges: WorkflowEdge[]
-  createdAt: Date
-  updatedAt: Date
-}
+import {
+  WorkflowNode,
+  WorkflowEdge,
+  Workflow,
+  AvailableTool,
+  NodeType,
+  ToolArgs,
+  sanitizeWorkflowName,
+  sanitizeWorkflowDescription,
+  validateToolArgs
+} from '@/types/workflow'
 
 interface WorkflowBuilderProps {
-  availableTools?: Array<{
-    name: string
-    description: string
-    parameters?: Record<string, any>
-  }>
+  availableTools?: AvailableTool[]
   onExecute?: (workflow: Workflow) => void
   onSave?: (workflow: Workflow) => void
 }
@@ -143,7 +122,7 @@ export function WorkflowBuilder({ availableTools = [], onExecute, onSave }: Work
   }
 
   // Add new node
-  const addNode = (type: WorkflowNode['type']) => {
+  const addNode = useCallback((type: NodeType) => {
     const newNode: WorkflowNode = {
       id: `node-${Date.now()}`,
       type,
@@ -152,7 +131,8 @@ export function WorkflowBuilder({ availableTools = [], onExecute, onSave }: Work
         x: 300 + Math.random() * 200, 
         y: 150 + Math.random() * 100 
       },
-      connections: []
+      connections: [],
+      args: type === 'tool' ? {} : undefined
     }
 
     setWorkflow(prev => ({
@@ -160,7 +140,7 @@ export function WorkflowBuilder({ availableTools = [], onExecute, onSave }: Work
       nodes: [...prev.nodes, newNode],
       updatedAt: new Date()
     }))
-  }
+  }, [])
 
   // Delete node
   const deleteNode = (nodeId: string) => {
@@ -315,8 +295,12 @@ export function WorkflowBuilder({ availableTools = [], onExecute, onSave }: Work
             <input
               type="text"
               value={workflow.name}
-              onChange={(e) => setWorkflow(prev => ({ ...prev, name: e.target.value }))}
+              onChange={(e) => setWorkflow(prev => ({ 
+                ...prev, 
+                name: sanitizeWorkflowName(e.target.value) 
+              }))}
               className="text-xl font-semibold bg-transparent border-b border-white/20 focus:outline-none focus:border-purple-500"
+              maxLength={100}
             />
             
             <div className="flex gap-2">
@@ -556,11 +540,15 @@ export function WorkflowBuilder({ availableTools = [], onExecute, onSave }: Work
                     onChange={(e) => setWorkflow(prev => ({
                       ...prev,
                       nodes: prev.nodes.map(n => 
-                        n.id === selectedNode ? { ...n, description: e.target.value } : n
+                        n.id === selectedNode ? { 
+                          ...n, 
+                          description: sanitizeWorkflowDescription(e.target.value) 
+                        } : n
                       )
                     }))}
                     className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                     rows={3}
+                    maxLength={500}
                   />
                 </div>
               </div>

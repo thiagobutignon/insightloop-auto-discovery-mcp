@@ -1,20 +1,38 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { registerServiceWorker, isOnline } from '@/lib/service-worker-registration';
 import { AlertCircle, WifiOff, Wifi } from 'lucide-react';
+
+// Lazy import to avoid SSR issues
+const registerServiceWorker = () => {
+  if (typeof window !== 'undefined') {
+    import('@/lib/service-worker-registration').then(({ registerServiceWorker }) => {
+      registerServiceWorker();
+    });
+  }
+};
+
+const checkIsOnline = () => {
+  if (typeof window !== 'undefined') {
+    return navigator.onLine;
+  }
+  return true;
+};
 
 export function ServiceWorkerProvider({ children }: { children: React.ReactNode }) {
   const [isOffline, setIsOffline] = useState(false);
   const [showUpdateBanner, setShowUpdateBanner] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
+    
     // Register service worker
     registerServiceWorker();
 
     // Check online status
     const updateOnlineStatus = () => {
-      setIsOffline(!isOnline());
+      setIsOffline(!checkIsOnline());
     };
 
     updateOnlineStatus();
@@ -37,6 +55,11 @@ export function ServiceWorkerProvider({ children }: { children: React.ReactNode 
       window.removeEventListener('offline', updateOnlineStatus);
     };
   }, []);
+
+  // Don't render anything until mounted to avoid hydration issues
+  if (!mounted) {
+    return <>{children}</>;
+  }
 
   return (
     <>
@@ -97,11 +120,11 @@ function ConnectionRestoredNotification() {
 
   useEffect(() => {
     const checkConnection = () => {
-      if (wasOffline && isOnline()) {
+      if (wasOffline && checkIsOnline()) {
         setShow(true);
         setTimeout(() => setShow(false), 3000);
       }
-      setWasOffline(!isOnline());
+      setWasOffline(!checkIsOnline());
     };
 
     const interval = setInterval(checkConnection, 1000);

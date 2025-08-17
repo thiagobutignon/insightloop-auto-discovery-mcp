@@ -1,54 +1,55 @@
 import { WorkflowBuilder } from '@/features/orchestration/components/WorkflowBuilder'
+import { Workflow, AvailableTool } from '@/types/workflow'
 
 // Mock available tools for demo
-const mockTools = [
+const mockTools: AvailableTool[] = [
   {
     name: 'fetch-documentation',
     description: 'Fetch documentation for a library',
-    parameters: {
-      library: 'string',
-      topic: 'string'
-    }
+    parameters: [
+      { name: 'library', type: 'string', required: true },
+      { name: 'topic', type: 'string', required: false }
+    ]
   },
   {
     name: 'resolve-library-id',
     description: 'Resolve library ID from name',
-    parameters: {
-      libraryName: 'string'
-    }
+    parameters: [
+      { name: 'libraryName', type: 'string', required: true }
+    ]
   },
   {
     name: 'get-library-docs',
     description: 'Get documentation for a library',
-    parameters: {
-      libraryId: 'string',
-      topic: 'string'
-    }
+    parameters: [
+      { name: 'libraryId', type: 'string', required: true },
+      { name: 'topic', type: 'string', required: false }
+    ]
   },
   {
     name: 'search-code',
     description: 'Search for code examples',
-    parameters: {
-      query: 'string',
-      language: 'string'
-    }
+    parameters: [
+      { name: 'query', type: 'string', required: true },
+      { name: 'language', type: 'string', required: false, default: 'typescript' }
+    ]
   },
   {
     name: 'execute-command',
     description: 'Execute a shell command',
-    parameters: {
-      command: 'string'
-    }
+    parameters: [
+      { name: 'command', type: 'string', required: true }
+    ]
   }
 ]
 
 export default function WorkflowPage() {
-  const handleExecute = async (workflow: any) => {
+  const handleExecute = async (workflow: Workflow) => {
     console.log('Executing workflow:', workflow)
     // Here you would integrate with the orchestration API
   }
 
-  const handleSave = (workflow: any) => {
+  const handleSave = (workflow: Workflow) => {
     console.log('Saving workflow:', workflow)
     // Here you would save to local storage or API
     localStorage.setItem(`workflow-${workflow.id}`, JSON.stringify(workflow))

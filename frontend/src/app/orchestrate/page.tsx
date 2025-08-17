@@ -1,4 +1,5 @@
 import { OrchestrationPanel } from '@/features/orchestration/components/OrchestrationPanel'
+import { FeatureErrorBoundary } from '@/shared/components/FeatureErrorBoundary'
 
 export default function OrchestratePage() {
   return (
@@ -12,7 +13,9 @@ export default function OrchestratePage() {
         </p>
       </div>
       
-      <OrchestrationPanel />
+      <FeatureErrorBoundary feature="orchestration">
+        <OrchestrationPanel />
+      </FeatureErrorBoundary>
     </div>
   )
 }

@@ -1,4 +1,5 @@
 import { ServerDiscovery } from '@/features/discovery/components/ServerDiscovery'
+import { FeatureErrorBoundary } from '@/shared/components/FeatureErrorBoundary'
 
 export default function DiscoverPage() {
   return (
@@ -12,7 +13,9 @@ export default function DiscoverPage() {
         </p>
       </div>
       
-      <ServerDiscovery />
+      <FeatureErrorBoundary feature="discovery">
+        <ServerDiscovery />
+      </FeatureErrorBoundary>
     </div>
   )
 }

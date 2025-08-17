@@ -7,12 +7,17 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "type-check": "tsc --noEmit",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:ci": "jest --ci --coverage --maxWorkers=2",
     "storybook": "storybook dev -p 6006",
-    "build-storybook": "storybook build"
+    "build-storybook": "storybook build",
+    "build:production": "npm run type-check && npm run lint && npm run build",
+    "preview": "npm run build && npm run start",
+    "clean": "rm -rf .next node_modules package-lock.json && npm install",
+    "analyze": "ANALYZE=true npm run build"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.1",
@@ -24,6 +29,7 @@
     "@radix-ui/react-tabs": "^1.1.13",
     "@radix-ui/react-toast": "^1.2.15",
     "@tanstack/react-query": "^5.85.3",
+    "@tanstack/react-query-devtools": "^5.85.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "critters": "^0.0.23",

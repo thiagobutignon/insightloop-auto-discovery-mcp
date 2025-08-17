@@ -5,8 +5,7 @@ Discovers MCP servers from GitHub, deploys them, and orchestrates with Gemini
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Query
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any, Literal
+from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 import asyncio
 import aiohttp
@@ -22,7 +21,18 @@ import re
 
 # Import from organized module structure
 from src.clients import UniversalMCPClient, MCPProtocol, MCPSSEClient, MCPSSEOrchestrator
+from src.clients.mcp_client import MCPClient
 from src.orchestrators import GeminiOrchestrator
+from src.discovery.github import GitHubDiscovery
+from src.deployers.server_deployer import ServerDeployer
+from src.models.requests import (
+    ServerDiscoveryRequest,
+    ServerInfo,
+    DeployRequest,
+    RegisterRequest,
+    OrchestrationRequest,
+    ToolInvocation
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -48,43 +58,6 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Pydantic models
-class ServerDiscoveryRequest(BaseModel):
-    query: str = Field(..., description="GitHub search query for MCP servers")
-    limit: int = Field(10, description="Maximum number of servers to discover", ge=1, le=100)
-    auto_deploy: bool = Field(False, description="Automatically deploy discovered servers")
-
-class ServerInfo(BaseModel):
-    id: str
-    name: str
-    github_url: str
-    description: Optional[str] = None
-    deploy_method: Literal["docker", "npx", "e2b", "local", "auto", "external"]
-    status: Literal["discovered", "validated", "deployed", "failed"]
-    endpoint: Optional[str] = None
-    capabilities: Optional[Dict[str, Any]] = None
-    created_at: datetime
-    error: Optional[str] = None
-
-class DeployRequest(BaseModel):
-    github_url: str = Field(..., description="GitHub repository URL")
-    method: Literal["docker", "npx", "e2b", "auto"] = Field("auto", description="Deployment method")
-    port: Optional[int] = Field(None, description="Port for HTTP/WebSocket servers")
-
-class RegisterRequest(BaseModel):
-    name: str = Field(..., description="Server name")
-    endpoint: str = Field(..., description="Server endpoint URL")
-    github_url: Optional[str] = Field(None, description="GitHub repository URL")
-
-class OrchestrationRequest(BaseModel):
-    server_id: str = Field(..., description="ID of the deployed MCP server")
-    prompt: str = Field(..., description="Task to execute with Gemini orchestration")
-    context: Optional[Dict[str, Any]] = Field(None, description="Additional context")
-
-class ToolInvocation(BaseModel):
-    server_id: str
-    tool_name: str
-    args: Dict[str, Any]
 
 # Health check
 @app.get("/health")
@@ -518,289 +491,6 @@ async def discover_mcp_capabilities(endpoint: str) -> Dict:
     
     return capabilities
 
-
-class GitHubDiscovery:
-    """GitHub repository discovery for MCP servers"""
-    
-    def __init__(self):
-        self.github_token = os.getenv("GITHUB_TOKEN")
-        self.headers = {
-            "Accept": "application/vnd.github.v3+json"
-        }
-        if self.github_token:
-            self.headers["Authorization"] = f"token {self.github_token}"
-    
-    async def search_repositories(self, query: str, limit: int = 10) -> List[Dict]:
-        """Search GitHub for MCP server repositories"""
-        
-        # Clean the query to avoid GitHub API issues with special characters
-        # But preserve forward slashes for specific repo searches like "owner/repo"
-        cleaned_query = query.replace("@", "")
-        
-        # Use the query as-is if it already mentions MCP or specific terms
-        # This preserves the user's search intent
-        if "mcp" in query.lower() or "model-context-protocol" in query.lower():
-            # User is already searching for MCP-related content
-            search_query = cleaned_query
-        else:
-            # Add MCP context only if not already present
-            search_query = f"{cleaned_query} (mcp OR model-context-protocol)"
-        
-        url = "https://api.github.com/search/repositories"
-        params = {
-            "q": search_query,
-            "per_page": min(limit, 100),
-            "sort": "stars",
-            "order": "desc"
-        }
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=self.headers, params=params) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data.get("items", [])
-                else:
-                    raise Exception(f"GitHub API error: {response.status}")
-    
-    async def validate_mcp_server(self, repo_url: str) -> bool:
-        """Validate if a repository is a valid MCP server"""
-        
-        # Check for common MCP server indicators
-        files_to_check = ["package.json", "Dockerfile", "mcp.json", ".well-known/mcp"]
-        
-        repo_api_url = repo_url.replace("github.com", "api.github.com/repos")
-        
-        async with aiohttp.ClientSession() as session:
-            for file in files_to_check:
-                url = f"{repo_api_url}/contents/{file}"
-                async with session.get(url, headers=self.headers) as response:
-                    if response.status == 200:
-                        return True
-        
-        return False
-
-
-class ServerDeployer:
-    """Deploy MCP servers using various methods"""
-    
-    async def clone_and_inspect(self, github_url: str) -> Dict:
-        """Clone repository and inspect structure"""
-        
-        # Create temporary directory without context manager to keep it alive
-        tmpdir = tempfile.mkdtemp(prefix="mcp-deploy-")
-        
-        # Clone repository
-        result = subprocess.run(
-            ["git", "clone", "--depth", "1", github_url, tmpdir],
-            capture_output=True,
-            text=True
-        )
-        
-        if result.returncode != 0:
-            # Clean up on error
-            import shutil
-            shutil.rmtree(tmpdir, ignore_errors=True)
-            raise Exception(f"Failed to clone repository: {result.stderr}")
-        
-        # Inspect repository structure
-        repo_path = Path(tmpdir)
-        info = {
-            "path": tmpdir,
-            "has_dockerfile": (repo_path / "Dockerfile").exists(),
-            "has_package_json": (repo_path / "package.json").exists(),
-            "has_docker_compose": (repo_path / "docker-compose.yml").exists(),
-            "has_requirements": (repo_path / "requirements.txt").exists(),
-        }
-        
-        # Read package.json if exists
-        if info["has_package_json"]:
-            with open(repo_path / "package.json", "r") as f:
-                info["package"] = json.load(f)
-        
-        return info
-    
-    def determine_method(self, repo_info: Dict) -> str:
-        """Determine best deployment method based on repository structure"""
-        
-        if repo_info.get("has_dockerfile") or repo_info.get("has_docker_compose"):
-            return "docker"
-        elif repo_info.get("has_package_json"):
-            # Check if it's an npm package
-            pkg = repo_info.get("package", {})
-            if pkg.get("name", "").startswith("@") and "mcp" in pkg.get("name", ""):
-                return "npx"
-        elif repo_info.get("has_requirements"):
-            return "local"
-        
-        return "e2b"  # Default to sandbox execution
-    
-    async def deploy_docker(self, repo_info: Dict, port: Optional[int] = None) -> str:
-        """Deploy using Docker"""
-        
-        import shutil
-        
-        port = port or 3000
-        # Extract repo name from package.json or path
-        repo_name = "unknown"
-        if repo_info.get("package", {}).get("name"):
-            # Use package name if available
-            repo_name = repo_info["package"]["name"].replace("@", "").replace("/", "-")
-        elif "/" in repo_info["path"]:
-            # Fallback to directory name
-            repo_name = repo_info["path"].split("/")[-1]
-        
-        # Clean up the name (remove special chars)
-        repo_name = re.sub(r'[^a-zA-Z0-9-]', '', repo_name)
-        
-        # Create descriptive container name
-        container_name = f"mcp-{repo_name}-port{port}"
-        
-        try:
-            # Build Docker image
-            result = subprocess.run(
-                ["docker", "build", "-t", container_name, repo_info["path"]],
-                capture_output=True,
-                text=True
-            )
-            
-            if result.returncode != 0:
-                raise Exception(f"Docker build failed: {result.stderr}")
-            
-            # Run container with environment variables
-            internal_port = 8080  # Most MCP servers run on 8080
-            
-            # Pass environment variables to container
-            docker_run_cmd = [
-                "docker", "run", "-d", 
-                "--name", container_name,
-                "-p", f"{port}:{internal_port}"
-            ]
-            
-            # Add environment variables if needed
-            if "github" in container_name.lower():
-                github_token = os.getenv("GITHUB_TOKEN", "")
-                if github_token:
-                    docker_run_cmd.extend(["-e", f"GITHUB_PERSONAL_ACCESS_TOKEN={github_token}"])
-                    docker_run_cmd.extend(["-e", f"GITHUB_TOKEN={github_token}"])
-            
-            # Add Gemini API key if available
-            gemini_key = os.getenv("GEMINI_API_KEY", "")
-            if gemini_key:
-                docker_run_cmd.extend(["-e", f"GEMINI_API_KEY={gemini_key}"])
-            
-            docker_run_cmd.append(container_name)
-            
-            result = subprocess.run(
-                docker_run_cmd,
-                capture_output=True,
-                text=True
-            )
-            
-            if result.returncode != 0:
-                raise Exception(f"Docker run failed: {result.stderr}")
-            
-            return f"http://localhost:{port}"
-        finally:
-            # Clean up temporary directory
-            if "path" in repo_info:
-                shutil.rmtree(repo_info["path"], ignore_errors=True)
-    
-    async def deploy_npx(self, repo_info: Dict, port: Optional[int] = None) -> str:
-        """Deploy using npx"""
-        
-        pkg = repo_info.get("package", {})
-        pkg_name = pkg.get("name", "unknown-mcp")
-        
-        # Start server in background
-        process = subprocess.Popen(
-            ["npx", "-y", pkg_name],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-        
-        # Wait for server to start
-        await asyncio.sleep(3)
-        
-        # Return stdio endpoint (npx servers typically use stdio)
-        return f"stdio://process/{process.pid}"
-    
-    async def deploy_e2b(self, repo_info: Dict, port: Optional[int] = None) -> str:
-        """Deploy using E2B sandbox"""
-        
-        # This would require E2B SDK integration
-        # For now, return a placeholder
-        logger.warning("E2B deployment not fully implemented")
-        return "e2b://sandbox/placeholder"
-    
-    async def deploy_local(self, repo_info: Dict, port: Optional[int] = None) -> str:
-        """Deploy locally"""
-        
-        port = port or 3000
-        
-        # Simple Python server deployment
-        if repo_info.get("has_requirements"):
-            # Install requirements
-            subprocess.run(
-                ["pip", "install", "-r", f"{repo_info['path']}/requirements.txt"],
-                capture_output=True
-            )
-            
-            # Find main file
-            main_files = ["main.py", "app.py", "server.py"]
-            for main_file in main_files:
-                if (Path(repo_info["path"]) / main_file).exists():
-                    # Start server
-                    process = subprocess.Popen(
-                        ["python", f"{repo_info['path']}/{main_file}"],
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE
-                    )
-                    
-                    await asyncio.sleep(3)
-                    return f"http://localhost:{port}"
-        
-        raise Exception("Could not determine how to start local server")
-
-
-class MCPClient:
-    """MCP client wrapper using universal client"""
-    
-    def __init__(self, endpoint: str):
-        self.endpoint = endpoint
-        self.client = UniversalMCPClient(endpoint)
-    
-    async def connect(self) -> bool:
-        """Connect to MCP server using universal client"""
-        try:
-            return await self.client.connect()
-        except Exception as e:
-            logger.error(f"Connection failed: {e}")
-            return False
-    
-    async def discover_capabilities(self) -> Dict:
-        """Discover server capabilities"""
-        try:
-            caps = await self.client.get_capabilities()
-            return {
-                "tools": caps.get("tools", []),
-                "resources": caps.get("resources", []),
-                "protocol": caps.get("protocol", "unknown")
-            }
-        except Exception as e:
-            logger.error(f"Capability discovery failed: {e}")
-            return {}
-    
-    async def invoke_tool(self, tool_name: str, args: Dict) -> Dict:
-        """Invoke a tool on the server"""
-        try:
-            return await self.client.invoke_tool(tool_name, args)
-        except Exception as e:
-            logger.error(f"Tool invocation failed: {e}")
-            raise
-    
-    async def close(self):
-        """Close connection"""
-        await self.client.close()
 
 
 

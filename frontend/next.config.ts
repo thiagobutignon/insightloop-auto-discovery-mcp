@@ -3,6 +3,9 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   
+  // Enable standalone output for Docker
+  output: 'standalone',
+  
   // Enable image optimization
   images: {
     domains: ['github.com', 'avatars.githubusercontent.com'],

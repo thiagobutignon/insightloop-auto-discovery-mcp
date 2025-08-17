@@ -1,10 +1,26 @@
 import { OrchestrationRepository } from '@/domain/repositories/OrchestrationRepository'
-import { OrchestrationTask, TaskStatus } from '@/domain/entities/OrchestrationTask'
+import { OrchestrationTask, TaskStatus, TaskEvent } from '@/domain/entities/OrchestrationTask'
 import { apiClient } from '../api/client'
+
+interface OrchestrationApiResponse {
+  task_id?: string;
+  result?: unknown;
+}
+
+interface TaskApiResponse {
+  id: string;
+  server_id: string;
+  prompt: string;
+  status: TaskStatus;
+}
+
+interface TasksListResponse {
+  tasks: TaskApiResponse[];
+}
 
 export class OrchestrationRepositoryImpl implements OrchestrationRepository {
   async createTask(serverId: string, prompt: string): Promise<OrchestrationTask> {
-    const response = await apiClient.post<any>('/api/orchestrate', {
+    const response = await apiClient.post<OrchestrationApiResponse>('/api/orchestrate', {
       server_id: serverId,
       prompt,
     })
@@ -25,7 +41,7 @@ export class OrchestrationRepositoryImpl implements OrchestrationRepository {
 
   async getTaskById(id: string): Promise<OrchestrationTask | null> {
     try {
-      const response = await apiClient.get<any>(`/api/tasks/${id}`)
+      const response = await apiClient.get<TaskApiResponse>(`/api/tasks/${id}`)
       return new OrchestrationTask(
         response.id,
         response.server_id,
@@ -38,8 +54,8 @@ export class OrchestrationRepositoryImpl implements OrchestrationRepository {
   }
 
   async getTasks(): Promise<OrchestrationTask[]> {
-    const response = await apiClient.get<any>('/api/tasks')
-    return response.tasks.map((t: any) => new OrchestrationTask(
+    const response = await apiClient.get<TasksListResponse>('/api/tasks')
+    return response.tasks.map((t) => new OrchestrationTask(
       t.id,
       t.server_id,
       t.prompt,
@@ -47,11 +63,24 @@ export class OrchestrationRepositoryImpl implements OrchestrationRepository {
     ))
   }
 
-  async streamTask(serverId: string, prompt: string, onEvent: (event: any) => void): Promise<void> {
+  async streamTask(serverId: string, prompt: string, onEvent: (event: TaskEvent) => void): Promise<void> {
     const eventSource = apiClient.streamSSE('/api/orchestrate/stream', {
       server_id: serverId,
       prompt,
-    }, onEvent)
+    }, (messageEvent: MessageEvent) => {
+      try {
+        const data = JSON.parse(messageEvent.data);
+        const taskEvent: TaskEvent = {
+          event: data.event || 'message',
+          message: data.message,
+          data: data.data,
+          timestamp: new Date()
+        };
+        onEvent(taskEvent);
+      } catch (error) {
+        console.error('Error parsing event data:', error);
+      }
+    })
 
     return new Promise((resolve, reject) => {
       eventSource.addEventListener('error', () => {

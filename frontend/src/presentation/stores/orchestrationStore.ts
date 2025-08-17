@@ -54,11 +54,14 @@ export const useOrchestrationStore = create<OrchestrationState>((set, get) => ({
         set({ streamEvents: [...task.events] })
         
         if (event.event === 'gemini_response') {
-          task.complete(event.response)
+          task.complete(event.data)
           const tasks = [...get().tasks, task]
           set({ tasks, loading: false })
         } else if (event.event === 'error') {
-          task.fail(event.error || event.message)
+          const errorMessage = typeof event.data === 'string' 
+            ? event.data 
+            : event.message || 'An error occurred'
+          task.fail(errorMessage)
           set({ loading: false })
         }
       })

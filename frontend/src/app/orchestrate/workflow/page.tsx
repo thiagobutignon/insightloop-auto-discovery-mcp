@@ -1,3 +1,5 @@
+'use client'
+
 import { WorkflowBuilder } from '@/features/orchestration/components/WorkflowBuilder'
 import { Workflow, AvailableTool } from '@/types/workflow'
 

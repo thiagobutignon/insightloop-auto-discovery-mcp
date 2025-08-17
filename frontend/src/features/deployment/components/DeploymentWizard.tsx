@@ -12,7 +12,7 @@ import {
   ChevronRight,
   ChevronLeft,
   Loader2,
-  Docker,
+  Container,
   Terminal,
   Cloud,
   AlertCircle
@@ -37,7 +37,7 @@ interface DeploymentConfig {
   cpuLimit?: string
 }
 
-const steps: Array<{ id: StepId; title: string; icon: any }> = [
+const steps: Array<{ id: StepId; title: string; icon: React.ComponentType<{ className?: string }> }> = [
   { id: 'method', title: 'Deployment Method', icon: Package },
   { id: 'configuration', title: 'Configuration', icon: Settings },
   { id: 'review', title: 'Review & Deploy', icon: Rocket },
@@ -104,7 +104,7 @@ export function DeploymentWizard({ server, onClose, onSuccess }: DeploymentWizar
                 )}
               >
                 <div className="flex items-start gap-4">
-                  <Docker className="w-8 h-8 text-blue-400 mt-1" />
+                  <Container className="w-8 h-8 text-blue-400 mt-1" />
                   <div>
                     <h3 className="font-semibold text-lg mb-1">Docker Container</h3>
                     <p className="text-sm text-gray-400">

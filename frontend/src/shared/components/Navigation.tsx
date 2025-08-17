@@ -37,7 +37,7 @@ export function Navigation() {
               <h1 className="text-xl font-bold bg-gradient-to-r from-blue-500 to-purple-600 bg-clip-text text-transparent">
                 InsightLoop
               </h1>
-              <p className="text-xs text-muted-foreground">Find Auto MCP's</p>
+              <p className="text-xs text-muted-foreground">Find Auto MCP&apos;s</p>
             </div>
           </Link>
 

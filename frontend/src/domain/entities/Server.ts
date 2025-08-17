@@ -2,7 +2,7 @@ export interface ServerCapabilities {
   tools?: Array<{
     name: string
     description?: string
-    parameters?: Record<string, any>
+    parameters?: Record<string, unknown>
   }>
   resources?: Array<{
     name: string
@@ -47,13 +47,25 @@ export class Server {
     public readonly updatedAt: Date = new Date()
   ) {}
 
-  static fromDiscovery(data: any): Server {
+  static fromDiscovery(data: {
+    id: string;
+    name: string;
+    description?: string;
+    author?: string;
+    github_url?: string;
+    githubUrl?: string;
+    docker_image?: string;
+    dockerImage?: string;
+    endpoint?: string;
+    protocol?: ServerProtocol;
+    capabilities?: ServerCapabilities;
+  }): Server {
     return new Server(
       data.id,
       data.name,
       data.description || '',
       data.author || '',
-      data.github_url || data.githubUrl,
+      data.github_url || data.githubUrl || '',
       data.docker_image || data.dockerImage,
       data.endpoint,
       ServerStatus.DISCOVERED,

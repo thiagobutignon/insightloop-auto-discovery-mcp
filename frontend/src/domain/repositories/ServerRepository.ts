@@ -1,4 +1,4 @@
-import { Server } from '../entities/Server'
+import { Server, ServerCapabilities } from '../entities/Server'
 
 export interface ServerRepository {
   discover(query?: string): Promise<Server[]>
@@ -6,5 +6,5 @@ export interface ServerRepository {
   deploy(id: string): Promise<Server>
   stop(id: string): Promise<void>
   getRunningServers(): Promise<Server[]>
-  updateCapabilities(id: string, capabilities: any): Promise<Server>
+  updateCapabilities(id: string, capabilities: ServerCapabilities): Promise<Server>
 }

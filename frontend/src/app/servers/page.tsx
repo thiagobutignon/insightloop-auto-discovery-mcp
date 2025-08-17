@@ -13,7 +13,7 @@ export default function ServersPage() {
         </p>
       </div>
       
-      <FeatureErrorBoundary feature="running-servers">
+      <FeatureErrorBoundary featureName="Running Servers">
         <RunningServers />
       </FeatureErrorBoundary>
     </div>

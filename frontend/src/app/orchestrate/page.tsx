@@ -13,7 +13,7 @@ export default function OrchestratePage() {
         </p>
       </div>
       
-      <FeatureErrorBoundary feature="orchestration">
+      <FeatureErrorBoundary featureName="Orchestration">
         <OrchestrationPanel />
       </FeatureErrorBoundary>
     </div>

@@ -1,59 +1,83 @@
-import axios, { AxiosInstance } from 'axios'
-
 export class ApiClient {
-  private client: AxiosInstance
+  private baseURL: string
 
   constructor(baseURL: string = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000') {
-    this.client = axios.create({
-      baseURL,
+    this.baseURL = baseURL
+  }
+
+  private async handleResponse<T>(response: Response): Promise<T> {
+    if (!response.ok) {
+      if (response.status === 401) {
+        console.error('Unauthorized')
+      }
+      const error = await response.text().catch(() => response.statusText)
+      throw new Error(`HTTP error! status: ${response.status}, message: ${error}`)
+    }
+    
+    const data = await response.json()
+    return data as T
+  }
+
+  async get<T>(url: string, params?: Record<string, unknown>): Promise<T> {
+    const queryString = params 
+      ? '?' + new URLSearchParams(
+          Object.entries(params).reduce((acc, [key, value]) => {
+            if (value !== undefined && value !== null) {
+              acc[key] = String(value)
+            }
+            return acc
+          }, {} as Record<string, string>)
+        ).toString()
+      : ''
+    
+    const response = await fetch(`${this.baseURL}${url}${queryString}`, {
+      method: 'GET',
       headers: {
         'Content-Type': 'application/json',
       },
     })
+    
+    return this.handleResponse<T>(response)
+  }
 
-    this.client.interceptors.request.use(
-      config => {
-        return config
+  async post<T>(url: string, data?: unknown): Promise<T> {
+    const response = await fetch(`${this.baseURL}${url}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
       },
-      error => {
-        return Promise.reject(error)
-      }
-    )
-
-    this.client.interceptors.response.use(
-      response => response,
-      error => {
-        if (error.response?.status === 401) {
-          console.error('Unauthorized')
-        }
-        return Promise.reject(error)
-      }
-    )
+      body: data ? JSON.stringify(data) : undefined,
+    })
+    
+    return this.handleResponse<T>(response)
   }
 
-  async get<T>(url: string, params?: any): Promise<T> {
-    const response = await this.client.get<T>(url, { params })
-    return response.data
-  }
-
-  async post<T>(url: string, data?: any): Promise<T> {
-    const response = await this.client.post<T>(url, data)
-    return response.data
-  }
-
-  async put<T>(url: string, data?: any): Promise<T> {
-    const response = await this.client.put<T>(url, data)
-    return response.data
+  async put<T>(url: string, data?: unknown): Promise<T> {
+    const response = await fetch(`${this.baseURL}${url}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: data ? JSON.stringify(data) : undefined,
+    })
+    
+    return this.handleResponse<T>(response)
   }
 
   async delete<T>(url: string): Promise<T> {
-    const response = await this.client.delete<T>(url)
-    return response.data
+    const response = await fetch(`${this.baseURL}${url}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+    
+    return this.handleResponse<T>(response)
   }
 
-  streamSSE(url: string, data: any, onMessage: (event: any) => void): EventSource {
+  streamSSE(url: string, data: Record<string, string>, onMessage: (event: MessageEvent) => void): EventSource {
     const params = new URLSearchParams(data)
-    const eventSource = new EventSource(`${this.client.defaults.baseURL}${url}?${params}`)
+    const eventSource = new EventSource(`${this.baseURL}${url}?${params}`)
     
     eventSource.onmessage = (event) => {
       try {

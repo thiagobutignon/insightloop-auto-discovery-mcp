@@ -135,7 +135,7 @@ export function OrchestrationPanel() {
                   {event.message && (
                     <div className="text-sm text-gray-400 mt-1">{event.message}</div>
                   )}
-                  {event.data && (
+                  {event.data !== null && event.data !== undefined && (
                     <pre className="text-xs text-gray-500 mt-2 p-2 bg-black/20 rounded overflow-x-auto">
                       {JSON.stringify(event.data, null, 2)}
                     </pre>

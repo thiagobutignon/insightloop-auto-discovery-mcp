@@ -241,7 +241,7 @@ export function LogsViewer({ server, className, onClose }: LogsViewerProps) {
             
             <select
               value={levelFilter}
-              onChange={(e) => setLevelFilter(e.target.value as any)}
+              onChange={(e) => setLevelFilter(e.target.value as 'all' | 'info' | 'warning' | 'error' | 'debug')}
               className="px-3 py-2 bg-white/10 border border-white/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-sm"
             >
               <option value="all">All Levels</option>

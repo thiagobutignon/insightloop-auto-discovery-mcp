@@ -13,7 +13,7 @@ export default function DiscoverPage() {
         </p>
       </div>
       
-      <FeatureErrorBoundary feature="discovery">
+      <FeatureErrorBoundary featureName="Discovery">
         <ServerDiscovery />
       </FeatureErrorBoundary>
     </div>

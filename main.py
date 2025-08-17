@@ -533,18 +533,22 @@ class GitHubDiscovery:
     async def search_repositories(self, query: str, limit: int = 10) -> List[Dict]:
         """Search GitHub for MCP server repositories"""
         
-        # Clean the query to avoid GitHub API issues
-        query = query.replace("@", "").replace("/", " ")
+        # Clean the query to avoid GitHub API issues with special characters
+        # But preserve forward slashes for specific repo searches like "owner/repo"
+        cleaned_query = query.replace("@", "")
         
-        # Build search query - simpler approach
-        if "context7" in query.lower() or "mcp" in query.lower():
-            enhanced_query = f"{query} OR mcp OR model-context-protocol"
+        # Use the query as-is if it already mentions MCP or specific terms
+        # This preserves the user's search intent
+        if "mcp" in query.lower() or "model-context-protocol" in query.lower():
+            # User is already searching for MCP-related content
+            search_query = cleaned_query
         else:
-            enhanced_query = f"{query} mcp OR model-context-protocol"
+            # Add MCP context only if not already present
+            search_query = f"{cleaned_query} (mcp OR model-context-protocol)"
         
         url = "https://api.github.com/search/repositories"
         params = {
-            "q": enhanced_query,
+            "q": search_query,
             "per_page": min(limit, 100),
             "sort": "stars",
             "order": "desc"

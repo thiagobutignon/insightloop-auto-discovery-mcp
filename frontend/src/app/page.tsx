@@ -14,7 +14,7 @@ export default function Home() {
 
   useEffect(() => {
     loadRunningServers()
-  }, [])
+  }, [loadRunningServers])
 
   const stats = [
     {
@@ -80,7 +80,7 @@ export default function Home() {
             InsightLoop
           </span>
         </h1>
-        <p className="text-xl text-gray-400 mb-2">Find Auto MCP's</p>
+        <p className="text-xl text-gray-400 mb-2">Find Auto MCP&apos;s</p>
         <p className="text-gray-500 max-w-2xl mx-auto">
           Discover, deploy, and orchestrate Model Context Protocol servers with AI-powered automation
         </p>

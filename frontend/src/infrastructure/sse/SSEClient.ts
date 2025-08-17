@@ -72,7 +72,7 @@ export class SSEClient extends EventEmitter {
       }
     }
 
-    this.eventSource.onerror = (error) => {
+    this.eventSource.onerror = () => {
       this.isConnected = false
       this.handleError(new Error('SSE connection error'))
       
@@ -83,19 +83,19 @@ export class SSEClient extends EventEmitter {
     }
 
     // Listen for custom events
-    this.eventSource.addEventListener('update', (event) => {
+    this.eventSource.addEventListener('update', (event: MessageEvent) => {
       this.emit('update', JSON.parse(event.data))
     })
 
-    this.eventSource.addEventListener('complete', (event) => {
+    this.eventSource.addEventListener('complete', (event: MessageEvent) => {
       this.emit('complete', JSON.parse(event.data))
     })
 
-    this.eventSource.addEventListener('error', (event) => {
+    this.eventSource.addEventListener('error', (event: MessageEvent) => {
       this.emit('stream-error', JSON.parse(event.data))
     })
 
-    this.eventSource.addEventListener('progress', (event) => {
+    this.eventSource.addEventListener('progress', (event: MessageEvent) => {
       this.emit('progress', JSON.parse(event.data))
     })
   }
@@ -171,7 +171,7 @@ export class SSEClient extends EventEmitter {
   }
 
   // Utility method to send data (if backend supports it)
-  async send(data: any): Promise<void> {
+  async send(data: unknown): Promise<void> {
     if (!this.isConnected) {
       throw new Error('SSE client is not connected')
     }
@@ -239,6 +239,7 @@ export function useSSE(url: string, options?: Partial<SSEConfig>) {
     return () => {
       sseClient.close()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url])
 
   return {

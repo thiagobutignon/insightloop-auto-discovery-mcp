@@ -10,8 +10,8 @@ export interface TaskStep {
   action: string
   description?: string
   tool?: string
-  args?: Record<string, any>
-  result?: any
+  args?: Record<string, unknown>
+  result?: unknown
   error?: string
   timestamp?: Date
 }
@@ -19,14 +19,14 @@ export interface TaskStep {
 export interface TaskEvent {
   event: string
   message?: string
-  data?: any
+  data?: unknown
   timestamp: Date
 }
 
 export class OrchestrationTask {
   public events: TaskEvent[] = []
   public steps: TaskStep[] = []
-  public result?: any
+  public result?: unknown
   public error?: string
 
   constructor(
@@ -38,7 +38,7 @@ export class OrchestrationTask {
     public updatedAt: Date = new Date()
   ) {}
 
-  addEvent(event: string, message?: string, data?: any): void {
+  addEvent(event: string, message?: string, data?: unknown): void {
     this.events.push({
       event,
       message,
@@ -61,7 +61,7 @@ export class OrchestrationTask {
     this.updatedAt = new Date()
   }
 
-  complete(result: any): void {
+  complete(result: unknown): void {
     this.result = result
     this.status = TaskStatus.COMPLETED
     this.updatedAt = new Date()

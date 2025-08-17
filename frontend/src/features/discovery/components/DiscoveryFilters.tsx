@@ -55,7 +55,7 @@ export function DiscoveryFilters({ onFilterChange, className }: DiscoveryFilters
   
   const [isExpanded, setIsExpanded] = useState(false)
 
-  const updateFilter = (key: keyof FilterOptions, value: any) => {
+  const updateFilter = (key: keyof FilterOptions, value: string | number) => {
     const newFilters = { ...filters, [key]: value }
     setFilters(newFilters)
     onFilterChange(newFilters)

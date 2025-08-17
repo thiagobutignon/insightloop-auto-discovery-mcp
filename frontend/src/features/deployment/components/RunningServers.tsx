@@ -14,7 +14,7 @@ export function RunningServers() {
 
   useEffect(() => {
     loadRunningServers()
-  }, [])
+  }, [loadRunningServers])
 
   const getProtocolBadge = (protocol?: ServerProtocol) => {
     const colors = {
